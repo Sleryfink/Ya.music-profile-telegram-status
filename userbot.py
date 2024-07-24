@@ -139,7 +139,7 @@ async def main():
 # чекер соединения
 def check_internet():
     url = 'http://www.ya.ru/'
-    timeout = 5
+    timeout = 30
     try:
         _ = requests.get(url, timeout=timeout)
         return True
