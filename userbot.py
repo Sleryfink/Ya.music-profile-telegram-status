@@ -2,8 +2,7 @@ import requests
 import time
 import telethon
 from telethon.sync import TelegramClient
-from yandex_music import Client
-from yandex_music.exceptions import NetworkError
+
 import asyncio
 import aiohttp
 import aiofiles
@@ -17,12 +16,11 @@ from telethon.errors import FloodWaitError
 api_id = ''
 api_hash = ''
 music_token = ''
-stock_tgk = 't.me/'
-new_tgk = 't.me/'
+stock_tgk = ''
+new_tgk = ''
 ###################
 
 client_tele = TelegramClient('my_account', api_id, api_hash)
-client_music = Client(music_token).init()
 
 default = ''
 count = 0
@@ -34,11 +32,16 @@ async def update_personal_channel(channel_id):
         # Получение информации о канале
         channel = await client.get_entity(channel_id)
 
+        # Проверка, стоит ли уже stock_tgk
+        if channel.title == stock_tgk:
+            print(f"Канал {stock_tgk} уже установлен. Повторное обновление не требуется.")
+            return  # Выходим, если уже установлен
+
         # Обновление личного канала
         result = await client(functions.account.UpdatePersonalChannelRequest(
             channel=types.InputChannel(channel.id, channel.access_hash)
         ))
-        print(f"Личный канал обновлён на {channel_id}:", result )
+        print(f"Личный канал обновлён на {channel_id}:", result)
 
 # function для обновления cover/title/mesage
 async def TelegramUpdatState(new_tgk, title, artists, img_uri):
@@ -67,7 +70,7 @@ async def TelegramUpdatState(new_tgk, title, artists, img_uri):
 
         # Часть 3: Изменение заголовка канала
         channel = await client.get_entity(new_tgk)
-    
+
             # Проверяем текущий заголовок
         if channel.title != title:
             await client(functions.channels.EditTitleRequest(new_tgk, title))
@@ -93,19 +96,17 @@ async def main():
     global default, count, wave
     try:
         wave = False
-        queues = client_music.queues_list()
-        try:
-            last_queue = client_music.queue(queues[0].id)
-        except TypeError:
-            print("Ошибка при получении очереди, это нормально для моей волны")
+        track_info = get_current_track()
+
+        if not track_info:
+            print("Нет информации о текущем треке.")
             await update_personal_channel(stock_tgk)
             return
-        last_track_id = last_queue.get_current_track()
-        last_track = last_track_id.fetch_track()
-        artists = ', '.join(last_track.artists_name())
-        title = last_track.title
-        # 👇 И ЗА ЭТОЙ ГРЕБАНОЙ СТРОКИ Я ПРО#РАЛ 2 ЧАСА
-        img_uri = f"https://{last_track.cover_uri[:-2]}1000x1000"
+
+        title = track_info['title']
+        artists = track_info['artist']
+        img_uri = track_info['img']
+
         if default != title:
             default = title
             try:
@@ -114,17 +115,14 @@ async def main():
             except FloodWaitError as e:
                 print(f"Превышен лимит запросов Telegram. Ждем {e.seconds} секунд.")
                 await update_personal_channel(stock_tgk)
-                await asyncio.sleep(e.seconds) # Ждем указанное время
+                await asyncio.sleep(e.seconds)
                 return await TelegramUpdatState(new_tgk, title, artists, img_uri)
-            # print(img_uri)
         else:
             if count < 5:
                 count += 1
             else:
                 count = 0
                 await update_personal_channel(stock_tgk)
-    # если я вот это снизу удалю то тогда код не будет работать
-    # кто может помочь, сделайте фикс и comit ;)
     except (IndexError, errors.AboutTooLongError):
         stock_bio = ''
         if wave:
@@ -134,6 +132,28 @@ async def main():
             await client_tele(functions.account.UpdateProfileRequest(
                 about=f"{stock_bio}"
             ))
+
+
+def get_current_track():
+    url = f"https://api.mipoh.ru/get_current_track_beta?ya_token={music_token}"
+    headers = {'accept': 'application/json'}
+
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()  # Проверка на ошибки
+        data = response.json()
+
+        track_info = {
+            'title': data['track']['title'],
+            'artist': data['track']['artist'],
+            'img': data['track']['img']
+        }
+        return track_info
+
+    except requests.exceptions.RequestException as e:
+        print(f"Ошибка запроса: {e}")
+        return None
+
 
 
 # чекер соединения
@@ -160,7 +180,7 @@ async def main_loop():
                 print('Произошла ошибка сети. Перезапуск через 30 секунд...')
                 await asyncio.sleep(30)
                 continue
-        await asyncio.sleep(80)
+        await asyncio.sleep(100)
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
